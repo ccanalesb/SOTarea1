@@ -7,130 +7,144 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <string.h>
 
-#define MAXLINE 256
+void in_file(char **cmd,int in){
+  int fdin = open(cmd[in + 1], O_RDONLY);
+  dup2(fdin, STDIN_FILENO);   
+}
 
+
+void out_file(char **cmd, int out){
+  int fdout = open(cmd[out + 1],O_WRONLY);
+  dup2(fdout, STDOUT_FILENO);
+  if (execvp(*cmd, cmd) < 0) {    /*Se ejecuta el comando a través de la llamada a sistema, 
+                    en caso de error, es decir, que no sea un comando de sistema, 
+                    se ejecuta el siguiente error */
+    printf("Comando Inválido\n");
+  }
+  else{
+    printf("System error\n"); //cualquier otro error, se ve reflejado acá
+  }
+}
+
+void pipe_in(char **cmd, int plec,int pid){
+  /*Proceso dentro del proceso, se  necesita generar un proceso para pasarle los datos
+                                de uno al otro */
+  int fd[2];
+  if ((pid = fork()) < 0) 
+  {
+    printf("mayday, mayday, call 911\n");
+    exit(1);
+  } 
+
+  else if (pid) 
+  {                 
+    dup2(fd[1], 1);
+    close(fd[0]);
+    execvp(*cmd, cmd);
+  } 
+  else {
+    dup2(fd[0], 0);
+    close(fd[1]);
+    execvp(cmd[plec + 1], &cmd[plec + 1]);
+  }
+}
 int main(void)
 {
-  char buf[MAXLINE];
-  pid_t pid;
+  char buf[1000];
+  int pid;
   int status;
-  int i, num_tok;
-  char **tok;
-  int in, out, inout, bg;
-  int fd[2], fdin, fdout;
+  int i, pos;
+  char **cmd;
+  int in, out, plec, amp,ext;
+  
 
-  printf("%% ");  /* print prompt (printf requires %% to print %) */
+  printf(">>");  /* print prompt (printf requires %% to print %) */
 
-  while (fgets(buf, MAXLINE, stdin) != NULL) {
-    buf[i = (strlen(buf) - 1)] = 0;       /* replace newline with null */
-
-    num_tok = 1;
+  while (fgets(buf, 1000, stdin) != NULL) {
+    i = (strlen(buf) - 1);
+    buf[i] = 0;       /* replace newline with null */
+    int j;
+    for ( j = 0; buf[j]!= '\0'; ++j)
+    {
+      printf("%c", buf[j]);
+    }
+    printf("\n");
+    
+    pos = 1;
     while (i)
       if (buf[i--] == ' ')
-        num_tok++;
+        pos++;
+    cmd = calloc(pos + 1, sizeof (char *));
+    i = in = out = plec = amp = 0; //se resetean los valores en cada iteración
 
-    if (!(tok = calloc(num_tok + 1, sizeof (char *)))) {
-      fprintf(stderr, "calloc failed");
-      exit(1);
-    }
+    cmd[i++] = strtok(buf, " ");
+    /*se recorre el arreglo hasta encontrar un esacio en blanco
+      buscando por cada uno de los tipos,
+      Si se encuentra de alguno de los tipos, se guarda la posición en la
+      que se encontró */
 
-    i = in = out = inout = bg = 0;
-    tok[i++] = strtok(buf, " ");
-    while ((tok[i] = strtok(NULL, " "))) {
-      switch (*tok[i]) {
-      case '<':
+    while ((cmd[i] = strtok(NULL, " "))) {  
+      if(strcmp(cmd[i],"<")==0){
         in = i;
-        tok[i] = NULL;
-        break;
-      case '>':
+        cmd[i] = NULL;
+      }
+      else if (strcmp(cmd[i],">")==0){
         out = i;
-        tok[i] = NULL;
-        break;
-      case '|':
-        inout = i;
-        tok[i] = NULL;
-        break;
-      case '&':
-        bg = i;
-        tok[i] = NULL;
-        break;
+        cmd[i] = NULL;
+      }
+      else if (strcmp(cmd[i],"|")==0){
+        plec = i;
+        cmd[i] = NULL;
+      }
+      else if (strcmp(cmd[i],"&&")==0){
+        amp = i;
+        cmd[i] = NULL;
+      }
+      else if (strcmp(cmd[i],"exit")==0)
+      {
+        ext= i;
+        cmd[i] = NULL;
       }
       i++;
     }
 
-    if (in && inout || out && inout) {
-      fprintf(stderr, "Not implemented\n");
-      continue;
-    }
-
-    if ((pid = fork()) < 0) {             /* for a process                  */
-      perror("fork error");   
+    /*Se compruebas los tipos de datos que se leyeron más arriba, comprobando que se tiene que hacer para cada una de las
+    entradas distintas*/
+    if ((pid = fork()) < 0) 
+    {
+      printf("mayday, mayday, call 911\n");
       exit(1);
-    } else if (!pid) {                    /* child                          */
+    } 
+    else if (pid==0) {                   
       if (in) {
-        if (-1 == (fdin = open(tok[in + 1], O_RDONLY))) { /* open file      */
-          perror("open failed");
-          exit(1);
-        }
-        dup2(fdin, STDIN_FILENO);         /* set it as standard input       */
-        if (!out) {
-          if (execvp(*tok, tok))          /* and exec                       */
-            perror("execvp failed");
-        }
+        in_file(cmd,in);
       }
+
       if (out) {
-        if (-1 == (fdout = open(tok[out + 1], O_WRONLY | O_CREAT, 0600))) {
-          perror("open failed");          /* same idea as in                */
-          exit(1);
-        }	  
-        dup2(fdout, STDOUT_FILENO);
-        if (execvp(*tok, tok))
-          perror("execvp failed");
+        out_file(cmd,out);
       }
-      if (inout) {
-        if (-1 == pipe(fd)) {
-          perror("pipe error");
-          exit(1);
-        }
-        if ((pid = fork()) < 0) {         /* starting 2 new processes, so   */
-          perror("fork error");           /* we fork again                  */
-          exit(1);
-        } else if (pid) {                 /* doesn't matter which is which  */
-          if (-1 == dup2(fd[1], STDOUT_FILENO)) {
-            perror("dup2 error");         /* make stdout the pipe           */
-            exit(1);
-        }
-          close(fd[0]);
-          if (execvp(*tok, tok)) {        /* and start first program        */
-            perror("execvp failed");
-            exit(1);
-          }
-        } else {
-          if (-1 == dup2(fd[0], STDIN_FILENO)) { /* same idea               */
-            perror("dup2 error");
-            exit(1);
-          }
-          close(fd[1]);
-          if (execvp(tok[inout + 1], &tok[inout + 1])) {
-            perror("execvp failed");
-            exit(1);
-          }
-        }
+      if (plec) {
+        pipe_in(cmd,plec,pid);
       }
-      if (!in && !out && !inout) {
-        if (execvp(*tok, tok)) {
-          perror("execvp failed");
+      if (ext)
+      {
+        exit(0);
+      }
+      if (!in && !out && !plec && !ext) { 
+        if (execvp(*cmd, cmd)) {
+          printf("Error en Comando");
           exit(1);
         }
       }
-    } else if (pid && !bg)
-      waitpid(pid, &status, 0);           /* not bg, wait                   */
-    /* else it is a background job!  Don't wait! */
+    } 
+    else if (pid && !amp)
+    waitpid(pid, &status, 0);          
 
-    free(tok);                            /* clean up dynamic memory!       */
+    free(cmd);                            
 
-    printf("%% ");
+    printf(">>");
   }
   exit(0);
 }

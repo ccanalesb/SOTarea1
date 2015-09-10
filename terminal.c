@@ -1,141 +1,150 @@
-#include <stdio.h> // Maneja I/O en sistema
-#include <unistd.h> //Maneja las llamadas a sistema
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <string.h>
 
-void  parse(char *line, char **argv)
-{
-     while (*line != '\0') {   
-          while (*line == ' ' || *line == '\t' || *line == '\n')
-               *line++ = '\0';     /* replace white spaces with 0    */
-          *argv++ = line;          /* save the argument position     */
-          while (*line != '\0' && *line != ' ' && 
-                 *line != '\t' && *line != '\n') 
-               line++;             /* skip the argument until ...    */
-     }
-     *argv = '\0';                 /* mark the end of argument list  */
+void in_file(char **cmd,int in){
+  int fdin = open(cmd[in + 1], O_RDONLY);
+  dup2(fdin, STDIN_FILENO);   
 }
 
 
-struct Types
+void out_file(char **cmd, int out){
+  int fdout = open(cmd[out + 1],O_WRONLY);
+  dup2(fdout, STDOUT_FILENO);
+  if (execvp(*cmd, cmd) < 0) {    /*Se ejecuta el comando a través de la llamada a sistema, 
+                    en caso de error, es decir, que no sea un comando de sistema, 
+                    se ejecuta el siguiente error */
+    printf("Comando Inválido\n");
+  }
+  else{
+    printf("System error\n"); //cualquier otro error, se ve reflejado acá
+  }
+}
+
+void pipe_in(char **cmd, int plec,int pid){
+  /*Proceso dentro del proceso, se  necesita generar un proceso para pasarle los datos
+                                de uno al otro */
+  int fd[2];
+  if ((pid = fork()) < 0) 
+  {
+    printf("mayday, mayday, call 911\n");
+    exit(1);
+  } 
+
+  else if (pid) 
+  {                 
+    dup2(fd[1], 1);
+    close(fd[0]);
+    execvp(*cmd, cmd);
+  } 
+  else {
+    dup2(fd[0], 0);
+    close(fd[1]);
+    execvp(cmd[plec + 1], &cmd[plec + 1]);
+  }
+}
+int main(void)
 {
-	int pos;
-	int type; /* si type es 1 => "&&"
-				 si type es 2 = > "|"
-				 si type es 3 = > "<"
-				 si type es 4 = > ">  */
-};
+  char buf[1000];
+  int pid;
+  int status;
+  int i, pos;
+  char **cmd;
+  int in, out, plec, amp,ext;
+  
 
+  printf(">>");  /* print prompt (printf requires %% to print %) */
 
-int main()
-{
-	char  cmd[1000];  //Linea donde se guardará el input del usuario           
-	char  *argv[20];  //guardará las posiciones de los argumentos
-	struct Types types[50];
-	char *cmds[20];
-	
-	int size=0;
-	// printf("%s\n", pipe);
-	// la consola funciona con todas las llamadas de sistema, pero acá muestro algunas.
-	printf("Esta consola acepta los siguientes comandos\n");
-	printf("\tls \n");
-	printf("\tpwd\n");
-	printf("\tnano\n");
-	printf("\tdate\n");
-	printf("Para más información del comando, ejecute: man <comando>\n");
+  while (fgets(buf, 1000, stdin) != NULL) {
+    i = (strlen(buf) - 1);
+    buf[i] = 0;       /* replace newline with null */
+    int j;
+    for ( j = 0; buf[j]!= '\0'; ++j)
+    {
+      printf("%c", buf[j]);
+    }
+    printf("\n");
+    
+    pos = 1;
+    while (i)
+      if (buf[i--] == ' ')
+        pos++;
+    cmd = calloc(pos + 1, sizeof (char *));
+    i = in = out = plec = amp = 0; //se resetean los valores en cada iteración
 
-	while(1){
+    cmd[i++] = strtok(buf, " ");
+    /*se recorre el arreglo hasta encontrar un esacio en blanco
+      buscando por cada uno de los tipos,
+      Si se encuentra de alguno de los tipos, se guarda la posición en la
+      que se encontró */
 
-		printf("\n>> "); //solo para que se vea más lindo.
-		fgets(cmd,sizeof(cmd),stdin); // lee la linea de entrada por stdin
-		size_t len = strlen(cmd) -1;
-		if (cmd[len]=='\n')
-		{
-			cmd[len]='\0'; //se elimina el ultimo caracter del fgets
-		}
-	
-		int i;
-		
-		parse(cmd, argv); //Divide la entrada, entre el comando y los argumentos
-		for ( i = 0; argv[i]!='\0'; i++)
-		{
-			if (strcmp(argv[i],"&&")==0)
-			{
-				types[size].pos=i;
-				types[size].type=1;
-				size++;	
-			}
-			else if (strcmp(argv[i],"|")==0)
-			{
-				types[size].pos=i;
-				types[size].type=2;
-				size++;	
-			}
-			else if (strcmp(argv[i],">")==0 | strcmp(argv[i],">>")==0)
-			{
-				types[size].pos=i;
-				types[size].type=4;
-				size++;	
-			}
-			else if (strcmp(argv[i],"<")==0 | strcmp(argv[i],"<<")==0)
-			{
-				types[size].pos=i;
-				types[size].type=3;
-				size++;	
-			}
-		}
-		for ( i = 0; i < size; i++)
-		{
-			if (types[i].type==1)
-			{
-				printf("%d - &&\n",types[i].pos);
-			}
-			else if (types[i].type==2)
-			{
-				printf("%d - |\n",types[i].pos);
-			}
-			else if (types[i].type==3)
-			{
-				printf("%d - <\n",types[i].pos);
-			}
-			else if (types[i].type==4)
-			{
-				printf("%d - >\n",types[i].pos);
-			}
-		}
-		for (i = 0; i < size; i++)
-		{
-			int cant= types[i].pos-1;
-			strncpy(argv[i],cmds[i],cant);
-		}
-		for (i = 0; i < size; i++)
-		{
-			printf("%s\n", cmds[i]);
-			
-		}
-		if (size==0)
-		{
-			int pid = fork(); //se crea el proceso padre
+    while ((cmd[i] = strtok(NULL, " "))) {  
+      if(strcmp(cmd[i],"<")==0){
+        in = i;
+        cmd[i] = NULL;
+      }
+      else if (strcmp(cmd[i],">")==0){
+        out = i;
+        cmd[i] = NULL;
+      }
+      else if (strcmp(cmd[i],"|")==0){
+        plec = i;
+        cmd[i] = NULL;
+      }
+      else if (strcmp(cmd[i],"&&")==0){
+        amp = i;
+        cmd[i] = NULL;
+      }
+      else if (strcmp(cmd[i],"exit")==0)
+      {
+        ext= i;
+        cmd[i] = NULL;
+      }
+      i++;
+    }
 
-			if (pid==-1){ //se comprueba que el proceso no sea hijo, si es el mismo padre, ejecuta el siguiente error
-				printf("mayday, mayday, call 911\n");
-			}
-			
-			else if (pid == 0){ //si el pid del proceso es 0, entonces es un hijo, todo puede ejecutarse sin problema
-				if (execvp(*argv, argv) < 0) {    /*Se ejecuta el comando a través de la llamada a sistema, 
-													en caso de error, es decir, que no sea un comando de sistema, 
-													se ejecuta el siguiente error */
-					printf("Comando Inválido\n");
-	          	}
-				else{
-					printf("System error\n"); //cualquier otro error, se ve reflejado acá
-				}
-			}
-			else wait(NULL); // Espera a que el proceso termine
-		}
+    /*Se compruebas los tipos de datos que se leyeron más arriba, comprobando que se tiene que hacer para cada una de las
+    entradas distintas*/
+    if ((pid = fork()) < 0) 
+    {
+      printf("mayday, mayday, call 911\n");
+      exit(1);
+    } 
+    else if (pid==0) {                   
+      if (in) {
+        in_file(cmd,in);
+      }
 
-		size=0;
+      if (out) {
+        out_file(cmd,out);
+      }
+      if (plec) {
+        pipe_in(cmd,plec,pid);
+      }
+      if (ext)
+      {
+        exit(0);
+      }
+      if (!in && !out && !plec && !ext) { 
+        if (execvp(*cmd, cmd)) {
+          printf("Error en Comando");
+          exit(1);
+        }
+      }
+    } 
+    else if (pid && !amp)
+    waitpid(pid, &status, 0);          
 
-	}
-	
-	return 0;
+    free(cmd);                            
+
+    printf(">>");
+  }
+  exit(0);
 }

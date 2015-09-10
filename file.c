@@ -9,7 +9,7 @@ main(int argc, char **argv)
 {
 	int pid, status;
 	int newfd;	/* new file descriptor */
-	char *cmd[] = { "/bin/ls", "-a", "/", 0 };
+	char *cmd[] = { "ls", "-a", "/", 0 };
 
 	if (argc != 2) {
 		fprintf(stderr, "usage: %s output_file\n", argv[0]);
