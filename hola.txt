@@ -1,0 +1,15 @@
+.
+..
+.DS_Store
+a.out
+file.c
+getline.c
+hola.txt
+juan.c
+parse.c
+pipe.c
+pipe2.c
+split.c
+terminal.c
+terminalinternet.c
+terminaljuan.c
